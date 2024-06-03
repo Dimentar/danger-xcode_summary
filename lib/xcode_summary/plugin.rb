@@ -337,7 +337,7 @@ module Danger
       # Substituting the pid for test retryies to filter them later.
       message = result.message
       message = message.sub(/, given input App element pid: \d{3,6}/, '.')
-      message = message.gsub(/\r\n$/, ' ').strip
+      message = message.gsub("\n", ' ').gsub("\r", ' ').strip
       if message_length_limit >= 0
         message = message[0, message_length_limit]
         message += '...'
