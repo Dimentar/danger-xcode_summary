@@ -259,7 +259,9 @@ module Danger
         Result.new(format_warning(result), result.location)
       end
 
-      if action.action_result.status != 'succeeded' then
+      if action.action_result.status == 'succeeded'
+        results = errors.uniq(&:message).reject { |result| result.message.nil? }
+      else
         test_failures = [
           action.action_result.issues.test_failure_summaries,
           action.build_result.issues.test_failure_summaries
@@ -267,9 +269,7 @@ module Danger
           result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
           Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
         end
-        results = (errors + test_failures).uniq.reject { |result| result.message.nil? }
-      else
-        results = errors.uniq.reject { |result| result.message.nil? }
+        results = (errors + test_failures).uniq(&:message).reject { |result| result.message.nil? }
       end
 
       results.delete_if(&ignored_results)
@@ -324,12 +324,15 @@ module Danger
     end
 
     def format_test_failure(result, producing_target, test_case_name)
-      return escape_reason(result.message) if result.location.nil?
+      # Substituting the pid for test retryies to filter them later.
+      message = result.message
+      message = message.sub(/, given input App element pid: \d{3,6}/, '.')
+      return escape_reason(message) if result.location.nil?
 
       path = result.location.file_path
       path_link = format_path(path, result.location.line)
       suite_name = "#{producing_target}.#{test_case_name}"
-      "**#{suite_name}**: #{escape_reason(result.message)}  <br />  #{path_link}"
+      "**#{suite_name}**: #{escape_reason(message)}  <br />  #{path_link}"
     end
   end
 end
