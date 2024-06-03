@@ -82,6 +82,12 @@ module Danger
     # @return   [Boolean]
     attr_accessor :strict
 
+    # Defines errors message length limit. If value is `nil`, then errors will be reporting full message.
+    # Defaults to `nil`
+    # @param    [Integer] value
+    # @return   [Integer]
+    attr_accessor :message_length_limit
+
     # rubocop:disable Lint/DuplicateMethods
     def project_root
       root = @project_root || Dir.pwd
@@ -119,6 +125,10 @@ module Danger
 
     def strict
       @strict.nil? ? true : @strict
+    end
+
+    def message_length_limit
+      @message_length_limit.nil? ? -1 : @message_length_limit
     end
 
     # Pick a Dangerfile plugin for a chosen request_source and cache it
@@ -327,6 +337,10 @@ module Danger
       # Substituting the pid for test retryies to filter them later.
       message = result.message
       message = message.sub(/, given input App element pid: \d{3,6}/, '.')
+      if message_length_limit >= 0
+        message = message[0, message_length_limit]
+        message += '...'
+      end
       return escape_reason(message) if result.location.nil?
 
       path = result.location.file_path
