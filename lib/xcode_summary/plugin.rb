@@ -88,6 +88,12 @@ module Danger
     # @return   [Integer]
     attr_accessor :message_length_limit
 
+    # Extracts Succeseful tests from TestPlanSummaries.
+    # Defaults to `[]`
+    # @param    [String] value
+    # @return   [String]
+    attr_accessor :success_test_ids
+
     # rubocop:disable Lint/DuplicateMethods
     def project_root
       root = @project_root || Dir.pwd
@@ -129,6 +135,10 @@ module Danger
 
     def message_length_limit
       @message_length_limit.nil? ? -1 : @message_length_limit
+    end
+
+    def success_test_ids
+      @success_test_ids.nil? ? [] : @success_test_ids
     end
 
     # Pick a Dangerfile plugin for a chosen request_source and cache it
@@ -177,6 +187,7 @@ module Danger
     private
 
     def format_summary(xcode_summary)
+      get_success_test_ids(xcode_summary)
       messages(xcode_summary).each { |s| message(s, sticky: sticky_summary) }
       all_warnings = []
       xcode_summary.actions_invocation_record.actions.each do |action|
@@ -246,6 +257,26 @@ module Danger
       end
     end
 
+    def get_success_test_ids(xcode_summary)
+      xcode_summary.action_test_plan_summaries.map do |test_plan_summaries|
+        test_plan_summaries.summaries.map do |summary|
+          summary.testable_summaries.map do |test_summary|
+            test_summary.tests.filter_map do |action_test_object|
+              if action_test_object.instance_of? XCResult::ActionTestSummaryGroup
+                action_test_object.subtests.filter_map do |subtest|
+                  @success_test_ids = subtest.subtests.flat_map do |s|
+                    s.subtests.select { |test| test.test_status == 'Success' }.map do |test|
+                      test.identifier.gsub('/', '.')
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
     def warnings(action)
       return [] if ignores_warnings
 
@@ -276,10 +307,14 @@ module Danger
           action.action_result.issues.test_failure_summaries,
           action.build_result.issues.test_failure_summaries
         ].flatten.compact.map do |summary|
-          result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
-          Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
+          if @success_test_ids.include?(summary.test_case_name)
+            nil
+          else
+            result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
+            Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
+          end
         end
-        results = (errors + test_failures).uniq(&:message).reject { |result| result.message.nil? }
+        results = (errors + test_failures).compact.uniq(&:message).reject { |result| result.message.nil? }
       end
 
       results.delete_if(&ignored_results)
