@@ -308,11 +308,10 @@ module Danger
           action.build_result.issues.test_failure_summaries
         ].flatten.compact.map do |summary|
           if @success_test_ids.include?(summary.test_case_name)
-            result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
-            Result.new(format_test_failure(result, summary.producing_target, '✅ ' + summary.test_case_name), result.location)
+            nil
           else
             result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
-            Result.new(format_test_failure(result, summary.producing_target, '❌ ' + summary.test_case_name), result.location)
+            Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
           end
         end
         results = (errors + test_failures).compact.uniq(&:message).reject { |result| result.message.nil? }
@@ -383,7 +382,7 @@ module Danger
       path = result.location.file_path
       path_link = format_path(path, result.location.line)
       if producing_target.nil? || producing_target.empty?
-        suite_name = test_case_name
+        suite_name = "#{test_case_name}"
       else
         suite_name = "#{producing_target}.#{test_case_name}"
       end
