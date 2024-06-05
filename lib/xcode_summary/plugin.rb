@@ -187,7 +187,7 @@ module Danger
     private
 
     def format_summary(xcode_summary)
-      get_success_test_ids(xcode_summary)
+      extract_success_test_ids(xcode_summary)
       messages(xcode_summary).each { |s| message(s, sticky: sticky_summary) }
       all_warnings = []
       xcode_summary.actions_invocation_record.actions.each do |action|
@@ -257,7 +257,7 @@ module Danger
       end
     end
 
-    def get_success_test_ids(xcode_summary)
+    def extract_success_test_ids(xcode_summary)
       xcode_summary.action_test_plan_summaries.map do |test_plan_summaries|
         test_plan_summaries.summaries.map do |summary|
           summary.testable_summaries.map do |test_summary|
@@ -308,10 +308,11 @@ module Danger
           action.build_result.issues.test_failure_summaries
         ].flatten.compact.map do |summary|
           if @success_test_ids.include?(summary.test_case_name)
-            nil
+            result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
+            Result.new(format_test_failure(result, summary.producing_target, '✅ ' + summary.test_case_name), result.location)
           else
             result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
-            Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
+            Result.new(format_test_failure(result, summary.producing_target, '❌ ' + summary.test_case_name), result.location)
           end
         end
         results = (errors + test_failures).compact.uniq(&:message).reject { |result| result.message.nil? }
@@ -381,7 +382,11 @@ module Danger
 
       path = result.location.file_path
       path_link = format_path(path, result.location.line)
-      suite_name = "#{producing_target}.#{test_case_name}"
+      if producing_target.nil? || producing_target.empty?
+        suite_name = test_case_name
+      else
+        suite_name = "#{producing_target}.#{test_case_name}"
+      end
       "**#{suite_name}**: #{escape_reason(message)}  <br />  #{path_link}"
     end
   end
