@@ -258,23 +258,14 @@ module Danger
     end
 
     def extract_success_test_ids(xcode_summary)
-      xcode_summary.action_test_plan_summaries.map do |test_plan_summaries|
-        test_plan_summaries.summaries.map do |summary|
-          summary.testable_summaries.map do |test_summary|
-            test_summary.tests.filter_map do |action_test_object|
-              if action_test_object.instance_of? XCResult::ActionTestSummaryGroup
-                action_test_object.subtests.filter_map do |subtest|
-                  @success_test_ids = subtest.subtests.flat_map do |s|
-                    s.subtests.select { |test| test.test_status == 'Success' }.map do |test|
-                      test.identifier.gsub('/', '.')
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
+      @success_test_ids = xcode_summary
+                          .action_test_plan_summaries
+                          .flat_map(&:summaries)
+                          .flat_map(&:testable_summaries)
+                          .flat_map(&:all_tests)
+                          .flat_map(&:all_subtests)
+                          .select { |test| test.test_status == 'Success' }
+                          .map { |test| test.identifier.gsub('/', '.') }
     end
 
     def warnings(action)
