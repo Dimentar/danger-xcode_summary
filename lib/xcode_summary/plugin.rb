@@ -82,6 +82,18 @@ module Danger
     # @return   [Boolean]
     attr_accessor :strict
 
+    # Defines errors message length limit. If value is `nil`, then errors will be reporting full message.
+    # Defaults to `nil`
+    # @param    [Integer] value
+    # @return   [Integer]
+    attr_accessor :message_length_limit
+
+    # Extracts Succeseful tests from TestPlanSummaries.
+    # Defaults to `[]`
+    # @param    [String] value
+    # @return   [String]
+    attr_accessor :success_test_ids
+
     # rubocop:disable Lint/DuplicateMethods
     def project_root
       root = @project_root || Dir.pwd
@@ -119,6 +131,14 @@ module Danger
 
     def strict
       @strict.nil? ? true : @strict
+    end
+
+    def message_length_limit
+      @message_length_limit.nil? ? -1 : @message_length_limit
+    end
+
+    def success_test_ids
+      @success_test_ids.nil? ? [] : @success_test_ids
     end
 
     # Pick a Dangerfile plugin for a chosen request_source and cache it
@@ -167,6 +187,7 @@ module Danger
     private
 
     def format_summary(xcode_summary)
+      extract_success_test_ids(xcode_summary)
       messages(xcode_summary).each { |s| message(s, sticky: sticky_summary) }
       all_warnings = []
       xcode_summary.actions_invocation_record.actions.each do |action|
@@ -236,6 +257,26 @@ module Danger
       end
     end
 
+    def extract_success_test_ids(xcode_summary)
+      xcode_summary.action_test_plan_summaries.map do |test_plan_summaries|
+        test_plan_summaries.summaries.map do |summary|
+          summary.testable_summaries.map do |test_summary|
+            test_summary.tests.filter_map do |action_test_object|
+              if action_test_object.instance_of? XCResult::ActionTestSummaryGroup
+                action_test_object.subtests.filter_map do |subtest|
+                  @success_test_ids = subtest.subtests.flat_map do |s|
+                    s.subtests.select { |test| test.test_status == 'Success' }.map do |test|
+                      test.identifier.gsub('/', '.')
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
     def warnings(action)
       return [] if ignores_warnings
 
@@ -259,16 +300,23 @@ module Danger
         Result.new(format_warning(result), result.location)
       end
 
-      test_failures = [
-        action.action_result.issues.test_failure_summaries,
-        action.build_result.issues.test_failure_summaries
-      ].flatten.compact.map do |summary|
-        result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
-        Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name),
-                   result.location)
+      if action.action_result.status == 'succeeded'
+        results = errors.uniq(&:message).reject { |result| result.message.nil? }
+      else
+        test_failures = [
+          action.action_result.issues.test_failure_summaries,
+          action.build_result.issues.test_failure_summaries
+        ].flatten.compact.map do |summary|
+          if @success_test_ids.include?(summary.test_case_name)
+            nil
+          else
+            result = Result.new(summary.message, parse_location(summary.document_location_in_creating_workspace))
+            Result.new(format_test_failure(result, summary.producing_target, summary.test_case_name), result.location)
+          end
+        end
+        results = (errors + test_failures).compact.uniq(&:message).reject { |result| result.message.nil? }
       end
 
-      results = (errors + test_failures).uniq.reject { |result| result.message.nil? }
       results.delete_if(&ignored_results)
     end
 
@@ -321,12 +369,24 @@ module Danger
     end
 
     def format_test_failure(result, producing_target, test_case_name)
-      return escape_reason(result.message) if result.location.nil?
+      # Substituting the pid for test retryies to filter them later.
+      message = result.message
+      message = message.sub(/, given input App element pid: \d{3,6}/, '.')
+      message = message.gsub("\n", ' ').gsub("\r", ' ').strip
+      if message_length_limit >= 0
+        message = message[0, message_length_limit]
+        message += '...'
+      end
+      return escape_reason(message) if result.location.nil?
 
       path = result.location.file_path
       path_link = format_path(path, result.location.line)
-      suite_name = "#{producing_target}.#{test_case_name}"
-      "**#{suite_name}**: #{escape_reason(result.message)}  <br />  #{path_link}"
+      if producing_target.nil? || producing_target.empty?
+        suite_name = "#{test_case_name}"
+      else
+        suite_name = "#{producing_target}.#{test_case_name}"
+      end
+      "**#{suite_name}**: #{escape_reason(message)}  <br />  #{path_link}"
     end
   end
 end
